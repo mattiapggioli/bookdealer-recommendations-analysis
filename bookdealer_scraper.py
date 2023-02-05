@@ -1,3 +1,8 @@
+"""
+This module contains a script for scraping book recommendations from
+bookdealer.it and writing the results to a CSV file.
+"""
+import sys
 from urllib.parse import urljoin
 from os import path
 import logging
@@ -11,39 +16,35 @@ logging.basicConfig(level=logging.DEBUG)
 DOMAIN = 'https://www.bookdealer.it/'
 
 
-def main():
-    path = '/i-consigli-dei-librai'
-    # Compose URl
-    book_rec_url = urljoin(DOMAIN, path)
-    logging.info('Parsing %s', book_rec_url)
-    book_rec_soup = get_soup(book_rec_url)
-    last_page_button = book_rec_soup.find_all('a', {'class': 'next-btn'})[1]
-    # Get last page number (after substring '?pag=')
-    last_page = int(last_page_button['href'][5:])
-    for page in range(1, last_page + 1):
-        books_in_page = []
-        logging.info('Parsing page %i', page)
-        page_soup = get_soup(f'{book_rec_url}?pag={page}')
-        book_headers = page_soup.find_all('div', {'class': 'product-header'})
-        # Parse book data from every book in page
-        for book_header in book_headers:
-            book_path = book_header.select_one(r'a[href*=\/libro\/]')['href']
-            book_url = urljoin(DOMAIN, book_path)
-            book_data = parse_book_data(book_url)
-            logging.info(book_data)
-            books_in_page.append(book_data)
-        logging.info('Page %i parsing completed', page)
-        write_csv(data=books_in_page, filename='data/bd-recommendations.csv')
-    logging.info('Parsing completed')
-
-
 def get_soup(url):
+    """
+    This function retrieves the HTML content of a given URL using the requests
+    library, and then creates a BeautifulSoup object to parse the HTML.
+
+    Input:
+    url (str): URL to retrieve HTML content from.
+
+    Output:
+    soup (BeautifulSoup object): Parsed HTML content.
+    """
     source = requests.get(url)
     soup = BeautifulSoup(source.text, 'html.parser')
     return soup
 
 
 def parse_book_data(url_book):
+    """
+    This function parses book data from a given URL using BeautifulSoup.
+    The data extracted includes the book title, price, author, publisher,
+    ISBN, category, translator, number of pages, release date, series,
+    number of recommendations from independent bookstores, and the synopsis.
+
+    Input:
+    url_book (str): URL of the book's page to be parsed.
+
+    Output:
+    book_data (dict): A dictionary containing the extracted book data.
+    """
     logging.info('Parsing book %s', url_book)
     book_data = {}
     book_soup = get_soup(url_book)
@@ -64,23 +65,23 @@ def parse_book_data(url_book):
     # Get str format (easier to parse using re)
     add_info = book_info.find('ul', {'class': 'list-unstyled'}).text
     # Labels for matching with mapping
-    add_info_mapping = {'Autore': 'author',
-                        'Editore': 'publisher',
-                        'Isbn': 'isbn',
-                        'Categoria': 'category',
-                        'Traduttore': 'translator',
-                        'Numero pagine': 'pages',
-                        'Data di Uscita': 'date',
-                        'Collana': 'series'}
-    for site_label in add_info_mapping:
+    additional_info_mapping = {'Autore': 'author',
+                               'Editore': 'publisher',
+                               'Isbn': 'isbn',
+                               'Categoria': 'category',
+                               'Traduttore': 'translator',
+                               'Numero pagine': 'pages',
+                               'Data di Uscita': 'date',
+                               'Collana': 'series'}
+    for site_label, label_key in additional_info_mapping.items():
         # Find info
         match = re.search(fr'{site_label}: (.+)\n', add_info)
         # Add information to dict with its respective key
         try:
-            book_data[add_info_mapping[site_label]] = match.group(1)
+            book_data[label_key] = match.group(1)
         except AttributeError:
             logging.debug('Label %s missing', site_label.upper())
-            book_data[add_info_mapping[site_label]] = None
+            book_data[label_key] = None
     # List of indie bookstores that recommend the book
     try:
         bookstores = book_soup.find('div', {'class': 'w-consigliato-da'}
@@ -102,7 +103,8 @@ def parse_book_data(url_book):
         book_data['bookstores'] = None
     # Book synopsis
     try:
-        book_data['synopsis'] = book_soup.find('article', {'class': 'review-article'}).text
+        book_data['synopsis'] = book_soup.find(
+            'article', {'class': 'review-article'}).text
     except AttributeError:
         logging.debug('No synopsis found')
         book_data['synopsis'] = None
@@ -110,6 +112,21 @@ def parse_book_data(url_book):
 
 
 def write_csv(data, filename):
+    """
+    This function writes the data provided to a CSV file.
+    If the file already exists, new data is appended to it.
+    Otherwise, the file is created and the first row of the
+    file is the header row with column names.
+
+    Input:
+    data (List of dictionaries): Data to be written to the file.
+    Each dictionary represents a single row in the file, with keys
+    being the column names and values being the cell values.
+    filename (str): Name of the file to be written.
+
+    Output:
+    None
+    """
     # Check if file already exists to write column names only once
     if path.exists(filename):
         write_column_names = False
@@ -126,5 +143,42 @@ def write_csv(data, filename):
         dict_writer.writerows(data)
 
 
+def main(filename):
+    """
+    Main function to scrape book recommendations from Bookdealer webstite
+    and store them in a CSV file.
+
+    Input:
+    filename (str): File name for the CSV file to
+    store the book recommendations.
+
+    Output:
+    None
+    """
+    path = '/i-consigli-dei-librai'
+    # Compose URl
+    book_rec_url = urljoin(DOMAIN, path)
+    logging.info('Parsing %s', book_rec_url)
+    book_rec_soup = get_soup(book_rec_url)
+    last_page_button = book_rec_soup.find_all('a', {'class': 'next-btn'})[1]
+    # Get last page number (after substring '?pag=')
+    last_page = int(last_page_button['href'][5:])
+    for page in range(1, last_page + 1):
+        books_in_page = []
+        logging.info('Parsing page %i', page)
+        page_soup = get_soup(f'{book_rec_url}?pag={page}')
+        book_headers = page_soup.find_all('div', {'class': 'product-header'})
+        # Parse book data from every book in page
+        for book_header in book_headers:
+            book_path = book_header.select_one(r'a[href*=\/libro\/]')['href']
+            book_url = urljoin(DOMAIN, book_path)
+            book_data = parse_book_data(book_url)
+            logging.info(book_data)
+            books_in_page.append(book_data)
+        logging.info('Page %i parsing completed', page)
+        write_csv(data=books_in_page, filename=filename)
+    logging.info('Parsing completed')
+
+
 if __name__ == '__main__':
-    main()
+    main(sys.argv[1])
